@@ -1,13 +1,35 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
+  default: none
   enable:
     - errcheck
     - govet
     - staticcheck
     - unused
-    - gofmt
-    - goimports
     - gosec
     - bodyclose
+  settings:
+    govet:
+      enable-all: true
+    staticcheck:
+      checks: ["all"]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes: github.com/peymanahmadi/riskguard
+
+issues:
+  exclude-dirs:
+    - vendor
+    - .git
+    - test
