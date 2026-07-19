@@ -14,11 +14,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/peymanahmadi/riskguard/internal/api"
+	ikafka "github.com/peymanahmadi/riskguard/internal/kafka"
 	"github.com/peymanahmadi/riskguard/internal/store/memory"
+	"github.com/peymanahmadi/riskguard/internal/store/postgres"
 	"github.com/peymanahmadi/riskguard/pkg/riskguard"
 	"github.com/peymanahmadi/riskguard/pkg/riskguard/rules"
 )
@@ -40,16 +43,30 @@ func run(logger *slog.Logger) error {
 
 	var (
 		profileStore riskguard.ProfileStore
-		//historyStore riskguard.HistoryStore
+		historyStore riskguard.HistoryStore
 		counterStore riskguard.CounterStore
 		blacklist    riskguard.Blacklist
 	)
 
-	profileStore = memory.NewProfileStore()
-	//historyStore = memory.NewHistoryStore()
-	counterStore = memory.NewCounterStore()
-	blacklist = memory.NewBlacklist()
-	logger.Info("using in-memory store (set STORE=postgres for a persistent backend)")
+	switch cfg.StoreKind {
+	case "postgres":
+		pg, err := postgres.New(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer pg.Close()
+		if err := pg.Migrate(ctx); err != nil {
+			return err
+		}
+		profileStore, historyStore, counterStore, blacklist = pg, pg, pg, pg
+		logger.Info("using postgres store")
+	default:
+		profileStore = memory.NewProfileStore()
+		historyStore = memory.NewHistoryStore()
+		counterStore = memory.NewCounterStore()
+		blacklist = memory.NewBlacklist()
+		logger.Info("using in-memory store (set STORE=postgres for a persistent backend)")
+	}
 
 	engine := riskguard.NewEngine(
 		riskguard.WithRules(
@@ -83,6 +100,22 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	if len(cfg.KafkaBrokers) > 0 {
+		pipeline := ikafka.NewPipeline(ikafka.Config{
+			Brokers:       cfg.KafkaBrokers,
+			InputTopic:    cfg.KafkaInputTopic,
+			OutputTopic:   cfg.KafkaOutputTopic,
+			ConsumerGroup: cfg.KafkaGroup,
+		}, engine, historyStore, logger)
+
+		go func() {
+			logger.Info("kafka pipeline starting", "brokers", cfg.KafkaBrokers)
+			if err := pipeline.Run(ctx); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+
 	select {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
@@ -98,16 +131,28 @@ func run(logger *slog.Logger) error {
 type config struct {
 	Port                    string
 	StoreKind               string
+	DatabaseURL             string
 	AmountThresholdMinor    int64
 	AmountThresholdCurrency string
+	KafkaBrokers            []string
+	KafkaInputTopic         string
+	KafkaOutputTopic        string
+	KafkaGroup              string
 }
 
 func loadConfig() config {
 	cfg := config{
 		Port:                    getenv("PORT", "8080"),
 		StoreKind:               getenv("STORE", "memory"),
+		DatabaseURL:             getenv("DATABASE_URL", "postgres://riskguard:riskguard@localhost:5432/riskguard?sslmode=disable"),
 		AmountThresholdMinor:    50000, // $500.00
 		AmountThresholdCurrency: getenv("AMOUNT_THRESHOLD_CURRENCY", "USD"),
+		KafkaInputTopic:         getenv("KAFKA_INPUT_TOPIC", "transactions"),
+		KafkaOutputTopic:        getenv("KAFKA_OUTPUT_TOPIC", "risk-decisions"),
+		KafkaGroup:              getenv("KAFKA_GROUP", "riskguard"),
+	}
+	if brokers := os.Getenv("KAFKA_BROKERS"); brokers != "" {
+		cfg.KafkaBrokers = strings.Split(brokers, ",")
 	}
 	return cfg
 }
