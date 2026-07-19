@@ -17,6 +17,12 @@ linters:
       enable-all: true
     staticcheck:
       checks: ["all"]
+  exclusions:
+    paths:
+      - vendor
+      - .git
+      - test
+      - third_party
 
 formatters:
   enable:
@@ -26,10 +32,5 @@ formatters:
     gofmt:
       simplify: true
     goimports:
-      local-prefixes: github.com/peymanahmadi/riskguard
-
-issues:
-  exclude-dirs:
-    - vendor
-    - .git
-    - test
+      local-prefixes:
+        - github.com/peymanahmadi/riskguard
