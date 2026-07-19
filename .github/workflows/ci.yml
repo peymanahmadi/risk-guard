@@ -38,9 +38,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.5"
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.12.2
+          version: latest
 
   integration:
     runs-on: ubuntu-latest
@@ -82,7 +82,7 @@ jobs:
           # Wait for Kafka to be ready
           echo "Waiting for Kafka to start..."
           for i in {1..30}; do
-            if docker exec kafka kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1; then
+            if docker exec kafka kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1; then
               echo "Kafka is ready!"
               break
             fi
@@ -97,8 +97,8 @@ jobs:
         run: |
           echo "Creating Kafka topics..."
           
-          # Create transactions topic
-          docker exec kafka kafka-topics.sh --create \
+          # Create transactions topic (using the full path)
+          docker exec kafka /usr/bin/kafka-topics --create \
             --bootstrap-server localhost:9092 \
             --topic transactions \
             --partitions 1 \
@@ -106,7 +106,7 @@ jobs:
             --if-not-exists
           
           # Create risk-decisions topic
-          docker exec kafka kafka-topics.sh --create \
+          docker exec kafka /usr/bin/kafka-topics --create \
             --bootstrap-server localhost:9092 \
             --topic risk-decisions \
             --partitions 1 \
@@ -115,7 +115,7 @@ jobs:
           
           # List topics to verify
           echo "Available topics:"
-          docker exec kafka kafka-topics.sh --list --bootstrap-server localhost:9092
+          docker exec kafka /usr/bin/kafka-topics --list --bootstrap-server localhost:9092
 
       - name: Integration tests
         env:
